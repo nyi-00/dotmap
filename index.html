@@ -1016,14 +1016,35 @@ body { margin: 0; }
       }));
       fd.append('files[0]', new Blob([buildJson(m)], { type: 'application/json' }), name + '.json');
       if (png) fd.append('files[1]', png, name + '.png');
-      fetch(url + (url.indexOf('?') < 0 ? '?wait=true' : ''), { method: 'POST', body: fd }).then(function (r) {
-        if (r.ok) { msg(name + ' をDiscordに送りました', false); toast('Discordに送りました'); }
-        else if (r.status === 401 || r.status === 404) msg('Webhook URL が正しくないか、削除されています（' + r.status + '）', true);
-        else if (r.status === 429) msg('送りすぎです。少し待ってからもう一度押してください', true);
-        else msg('送信に失敗しました（' + r.status + '）', true);
-      }).catch(function () {
-        msg('送信できませんでした。ネット接続とURLを確認してください。Discordに届いていないかも見てください', true);
-      }).then(function () { sending = false; $('sendDiscord').disabled = false; });
+      fetch(url + (url.indexOf('?') < 0 ? '?wait=true' : ''), {
+        method: 'POST',
+        body: fd
+      }).then(function (r) {
+        return r.text().then(function (body) {
+          if (r.ok) {
+            msg(name + ' をDiscordに送りました', false);
+            toast('Discordに送りました');
+            return;
+          }
+
+          // Discordが返したエラー本文を表示して、400の原因を特定しやすくする
+          var detail = body || '詳細なエラー情報はありません';
+          try {
+            var data = JSON.parse(body);
+            detail = data.message || detail;
+            if (data.errors) detail += ' / ' + JSON.stringify(data.errors);
+          } catch (err) { /* JSON以外の応答はそのまま表示 */ }
+
+          msg('送信に失敗しました（' + r.status + '）：' + detail.slice(0, 400), true);
+          console.error('Discord Webhook error:', r.status, body);
+        });
+      }).catch(function (error) {
+        console.error('Discord送信エラー:', error);
+        msg('送信できませんでした。ネット接続やWebhook URLを確認してください', true);
+      }).then(function () {
+        sending = false;
+        $('sendDiscord').disabled = false;
+      });
     });
   });
 
