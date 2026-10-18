@@ -1016,7 +1016,24 @@ body { margin: 0; }
       }));
       fd.append('files[0]', new Blob([buildJson(m)], { type: 'application/json' }), name + '.json');
       if (png) fd.append('files[1]', png, name + '.png');
-      fetch(url + (url.indexOf('?') < 0 ? '?wait=true' : ''), {
+      // ページURLにBotが付けたフォーラム情報をWebhook送信先にも引き継ぐ
+      var sendUrl = url;
+      try {
+        var webhookUrl = new URL(url);
+        if (!webhookUrl.searchParams.has('wait')) webhookUrl.searchParams.set('wait', 'true');
+        var pageParams = new URLSearchParams(location.search);
+        var threadId = (pageParams.get('thread') || '').trim();
+        var threadName = (pageParams.get('tname') || '').trim();
+        if (threadId) {
+          webhookUrl.searchParams.set('thread_id', threadId);
+        } else if (threadName) {
+          webhookUrl.searchParams.set('thread_name', threadName);
+        }
+        sendUrl = webhookUrl.toString();
+      } catch (err) {
+        sendUrl = url + (url.indexOf('?') < 0 ? '?wait=true' : '');
+      }
+      fetch(sendUrl, {
         method: 'POST',
         body: fd
       }).then(function (r) {
