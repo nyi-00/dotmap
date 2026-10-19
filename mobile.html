@@ -490,6 +490,7 @@ body { margin: 0; }
   var MAXZ = 16;
   var z = 4, mode = 'draw', kind = 1, tool = 'pen', erase = false, brush = 1;
   var rectDrag = null, panDrag = null, spaceDown = false, zacc = 0;
+  var activeTouches = new Map(), pinchState = null;
   var showGrid = true, paintAlpha = 0.85;
   var img = { el: null, url: null, x: 0, y: 0, w: N, alpha: 0.6, visible: true };
   var hover = null, painting = false, changed = false, lastCell = null, drag = null, raf = 0;
@@ -739,7 +740,22 @@ body { margin: 0; }
 
   cv.addEventListener('mousedown', function (e) { if (e.button === 1) e.preventDefault(); });
   cv.addEventListener('pointerdown', function (e) {
-    if (e.pointerType === 'touch') e.preventDefault();
+    if (e.pointerType === 'touch') {
+      e.preventDefault();
+      activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (activeTouches.size >= 2) {
+        // A second finger switches from drawing to map navigation.
+        painting = false; changed = false; rectDrag = null; drag = null; panDrag = null;
+        var pts = Array.from(activeTouches.values());
+        var dx = pts[1].x - pts[0].x, dy = pts[1].y - pts[0].y;
+        pinchState = { distance: Math.max(1, Math.hypot(dx, dy)), zoom: z,
+          midX: (pts[0].x + pts[1].x) / 2, midY: (pts[0].y + pts[1].y) / 2,
+          left: vp.scrollLeft, top: vp.scrollTop };
+        try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+        cv.classList.remove('dragging');
+        return;
+      }
+    }
     if (e.pointerType === 'mouse' && e.button !== 0 && e.button !== 1) return;
     var wantPan = e.button === 1 || spaceDown || (mode === 'view' && e.pointerType === 'mouse');
     if (wantPan) {
@@ -776,6 +792,21 @@ body { margin: 0; }
     schedule();
   });
   cv.addEventListener('pointermove', function (e) {
+    if (e.pointerType === 'touch' && activeTouches.has(e.pointerId)) {
+      activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinchState && activeTouches.size >= 2) {
+        var pts = Array.from(activeTouches.values());
+        var dx = pts[1].x - pts[0].x, dy = pts[1].y - pts[0].y;
+        var distance = Math.max(1, Math.hypot(dx, dy));
+        var midX = (pts[0].x + pts[1].x) / 2, midY = (pts[0].y + pts[1].y) / 2;
+        var nextZoom = clamp(Math.round(pinchState.zoom * distance / pinchState.distance), 1, MAXZ);
+        setZoom(nextZoom, midX, midY);
+        vp.scrollLeft = Math.max(0, vp.scrollLeft - (midX - pinchState.midX));
+        vp.scrollTop = Math.max(0, vp.scrollTop - (midY - pinchState.midY));
+        pinchState.midX = midX; pinchState.midY = midY;
+        return;
+      }
+    }
     if (panDrag) {
       vp.scrollLeft = panDrag.l - (e.clientX - panDrag.sx);
       vp.scrollTop = panDrag.t - (e.clientY - panDrag.sy);
@@ -798,7 +829,14 @@ body { margin: 0; }
     if (painting) { line(lastCell, c); lastCell = c; }
     schedule();
   });
-  function endPointer() {
+  function endPointer(e) {
+    if (e && e.pointerId != null) activeTouches.delete(e.pointerId);
+    if (pinchState) {
+      pinchState = null;
+      panDrag = null; drag = null; rectDrag = null; painting = false;
+      cv.classList.remove('dragging');
+      return;
+    }
     if (panDrag) { panDrag = null; cv.classList.remove('dragging'); return; }
     if (drag) { drag = null; cv.classList.remove('dragging'); return; }
     if (rectDrag) {
@@ -817,7 +855,7 @@ body { margin: 0; }
   }
   cv.addEventListener('pointerup', endPointer);
   cv.addEventListener('lostpointercapture', endPointer);
-  cv.addEventListener('pointercancel', function () { rectDrag = null; endPointer(); schedule(); });
+  cv.addEventListener('pointercancel', function (e) { activeTouches.delete(e.pointerId); pinchState = null; rectDrag = null; endPointer(e); schedule(); });
   cv.addEventListener('pointerleave', function () { hover = null; schedule(); });
   cv.addEventListener('wheel', function (e) {
     if (e.ctrlKey || e.metaKey) {
